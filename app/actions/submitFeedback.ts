@@ -1,21 +1,22 @@
 "use server";
 
-import { feedbackSchema, FeedbackFormData } from "@/lib/schemas/feedback";
+import { feedbackSchema } from "@/lib/schemas/feedback";
+import { appendFeedback } from "@/lib/feedback-db";
 
-export async function submitFeedback(data: FeedbackFormData) {
-  // Validasi ulang di server (opsional tapi disarankan)
-  const parsed = feedbackSchema.safeParse(data);
+export async function submitFeedback(
+  input: unknown
+): Promise<{ success: boolean; error?: string }> {
+  // Validate again on the server — never trust data coming from the browser
+  const parsed = feedbackSchema.safeParse(input);
   if (!parsed.success) {
-    return { success: false, errors: parsed.error.flatten().fieldErrors };
+    return { success: false, error: "Invalid form data" };
   }
 
-  // -- DI SINI ANDA BISA MENYIMPAN KE DATABASE --
-  // Contoh: await prisma.feedback.create({ data: parsed.data });
-  // Atau kirim ke Google Sheets API, dsb.
-  console.log("Feedback submitted:", parsed.data);
-
-  // Simulasi delay jaringan
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-
-  return { success: true, message: "Feedback submitted successfully!" };
+  try {
+    await appendFeedback(parsed.data);
+    return { success: true };
+  } catch (err) {
+    console.error("[submitFeedback] Firestore error:", err);
+    return { success: false, error: "Failed to save feedback" };
+  }
 }

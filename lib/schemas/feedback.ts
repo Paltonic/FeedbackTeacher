@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // Skala Likert 1-4
 const scaleSchema = z.enum(["1", "2", "3", "4"], {
-  errorMap: () => ({ message: "Please select a rating (1-4)" }),
+  error: "Please select a rating (1-4)",
 });
 
 export const feedbackSchema = z.object({
