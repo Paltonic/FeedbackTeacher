@@ -5,6 +5,7 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { feedbackSchema, FeedbackFormData } from "@/lib/schemas/feedback";
 import { submitFeedback } from "@/app/actions/submitFeedback";
+import SearchableSelect from "./SearchableSelect";
 
 type Step = "personal" | "professional" | "pedagogical" | "social" | "review";
 
