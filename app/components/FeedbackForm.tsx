@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { feedbackSchema, FeedbackFormData } from "@/lib/schemas/feedback";
 import { submitFeedback } from "@/app/actions/submitFeedback";
 import SearchableSelect from "./SearchableSelect";
+import { getMasterOptions } from "@/app/actions/getMasterOptions";
+import type { MasterData } from "@/lib/master-types";
 
 type Step = "personal" | "professional" | "pedagogical" | "social" | "review";
 
@@ -27,12 +29,23 @@ const RATING_OPTIONS = [
 export default function FeedbackForm() {
   const [currentStep, setCurrentStep] = useState<Step>("personal");
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
+  const [master, setMaster] = useState<MasterData | null>(null);
+  const [masterError, setMasterError] = useState(false);
+
+  useEffect(() => {
+    getMasterOptions()
+      .then(setMaster)
+      .catch(() => setMasterError(true));
+  }, []);
 
   const {
     register,
     control,
     handleSubmit,
     trigger,
+    setValue,
+    getValues,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<FeedbackFormData>({
     resolver: zodResolver(feedbackSchema),
@@ -46,6 +59,18 @@ export default function FeedbackForm() {
       social5: "1", social6: "1", social7: "1",
     },
   });
+
+  // Name list: all students, or only the chosen class's students if a class is picked
+  const selectedClass = watch("class");
+  const studentNames = useMemo(
+    () =>
+      (master?.students ?? [])
+        .filter((s) => !selectedClass || s.class === selectedClass)
+        .map((s) => s.name),
+    [master, selectedClass]
+  );
+  const classOf = (name: string) => master?.students.find((s) => s.name === name)?.class;
+  const loadingPlaceholder = masterError ? "Failed to load list — please refresh" : "Loading…";
 
   const nextStep = async () => {
     const fieldsToValidate = getFieldsForStep(currentStep);
@@ -81,7 +106,7 @@ export default function FeedbackForm() {
     if (result.success) {
       setSubmitMessage("✅ Thank you! Your feedback has been submitted.");
     } else {
-      setSubmitMessage("❌ Something went wrong. Please try again.");
+      setSubmitMessage(`❌ ${result.error ?? "Something went wrong. Please try again."}`);
     }
   };
 
@@ -199,6 +224,36 @@ export default function FeedbackForm() {
           resize: vertical;
           min-height: 100px;
         }
+        /* Searchable dropdown (SearchableSelect) */
+        .ss-root { position: relative; }
+        .ss-control { position: relative; }
+        .ss-input { padding-right: 4.25rem !important; cursor: pointer; }
+        .ss-input:focus { cursor: text; }
+        .ss-invalid .ss-input { border-color: #d9232d; }
+        .ss-disabled .ss-input { cursor: not-allowed; opacity: 0.6; }
+        .ss-caret {
+          position: absolute; right: 1rem; top: 50%; transform: translateY(-50%);
+          font-size: 0.65rem; color: #64748b; pointer-events: none;
+        }
+        .ss-clear {
+          position: absolute; right: 2.25rem; top: 50%; transform: translateY(-50%);
+          width: 24px; height: 24px; border: none; border-radius: 50%;
+          background: transparent; color: #94a3b8; font-size: 1.1rem; line-height: 1;
+          cursor: pointer;
+        }
+        .ss-clear:hover { background: #e2e8f0; color: #475569; }
+        .ss-list {
+          position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px);
+          max-height: 260px; overflow-y: auto; margin: 0; padding: 0.25rem; list-style: none;
+          background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px;
+          box-shadow: 0 10px 25px rgba(15, 23, 42, 0.12);
+        }
+        .ss-option { padding: 0.6rem 0.75rem; border-radius: 6px; cursor: pointer; color: #1e293b; }
+        .ss-active { background-color: rgba(10, 114, 181, 0.08); }
+        .ss-selected { font-weight: 600; color: #0a72b5; }
+        .ss-empty { padding: 0.6rem 0.75rem; color: #94a3b8; font-style: italic; font-size: 0.9rem; }
+        .ss-mark { background: #fde68a; color: inherit; padding: 0; border-radius: 2px; }
+
         .error-text {
           color: #d9232d;
           font-size: 0.85rem;
@@ -330,19 +385,77 @@ export default function FeedbackForm() {
             
             <div className="form-group">
               <label className="form-label">Name *</label>
-              <input {...register("name")} className="form-input" placeholder="Your full name" />
+              <Controller
+                name="name"
+                control={control}
+                render={({ field }) => (
+                  <SearchableSelect
+                    options={studentNames}
+                    value={field.value ?? ""}
+                    onChange={(name) => {
+                      field.onChange(name);
+                      // Fill in the student's class automatically
+                      const cls = name ? classOf(name) : undefined;
+                      if (cls) setValue("class", cls, { shouldValidate: true });
+                    }}
+                    onBlur={field.onBlur}
+                    disabled={!master}
+                    disabledPlaceholder={loadingPlaceholder}
+                    placeholder="Type to search your name"
+                    emptyText="Name not found"
+                    invalid={!!errors.name}
+                  />
+                )}
+              />
               {errors.name && <p className="error-text">{errors.name.message}</p>}
             </div>
-            
+
             <div className="form-group">
               <label className="form-label">Class *</label>
-              <input {...register("class")} className="form-input" placeholder="Your class (e.g., 10A)" />
+              <Controller
+                name="class"
+                control={control}
+                render={({ field }) => (
+                  <SearchableSelect
+                    options={master?.classes ?? []}
+                    value={field.value ?? ""}
+                    onChange={(cls) => {
+                      field.onChange(cls);
+                      // Clear the name if it doesn't belong to the newly chosen class
+                      const name = getValues("name");
+                      if (cls && name && classOf(name) !== cls) setValue("name", "");
+                    }}
+                    onBlur={field.onBlur}
+                    disabled={!master}
+                    disabledPlaceholder={loadingPlaceholder}
+                    placeholder="Filled in automatically from your name"
+                    emptyText="Class not found"
+                    invalid={!!errors.class}
+                  />
+                )}
+              />
               {errors.class && <p className="error-text">{errors.class.message}</p>}
             </div>
-            
+
             <div className="form-group">
               <label className="form-label">Teacher Name *</label>
-              <input {...register("teacherName")} className="form-input" placeholder="Name of the teacher" />
+              <Controller
+                name="teacherName"
+                control={control}
+                render={({ field }) => (
+                  <SearchableSelect
+                    options={master?.teachers ?? []}
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    onBlur={field.onBlur}
+                    disabled={!master}
+                    disabledPlaceholder={loadingPlaceholder}
+                    placeholder="Type to search teacher name"
+                    emptyText="Teacher not found"
+                    invalid={!!errors.teacherName}
+                  />
+                )}
+              />
               {errors.teacherName && <p className="error-text">{errors.teacherName.message}</p>}
             </div>
           </section>
