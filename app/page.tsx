@@ -34,6 +34,16 @@ export default function Home() {
       
       {/* FORM SECTION */}
       <FeedbackForm />
+
+      {/* FOOTER / WATERMARK */}
+      <footer className="max-w-3xl mx-auto mt-10 pt-6 border-t border-slate-200 text-center select-none">
+        <p className="text-sm text-slate-400">
+          <span className="font-semibold text-[#0a72b5]">@ Erick Sensei</span>
+        </p>
+        <p className="text-xs text-slate-400 mt-1">
+          © 2026 Nakamura School · Teacher Performance Feedback
+        </p>
+      </footer>
     </main>
   );
 }
