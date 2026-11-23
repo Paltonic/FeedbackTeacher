@@ -7,6 +7,7 @@ import { feedbackSchema, FeedbackFormData } from "@/lib/schemas/feedback";
 import { submitFeedback } from "@/app/actions/submitFeedback";
 import SearchableSelect from "./SearchableSelect";
 import { getMasterOptions } from "@/app/actions/getMasterOptions";
+import { getRatedTeachers } from "@/app/actions/getRatedTeachers";
 import type { MasterData } from "@/lib/master-types";
 
 type Step = "personal" | "professional" | "pedagogical" | "social" | "review";
@@ -31,12 +32,24 @@ export default function FeedbackForm() {
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const [master, setMaster] = useState<MasterData | null>(null);
   const [masterError, setMasterError] = useState(false);
+  const [ratedTeachers, setRatedTeachers] = useState<string[]>([]);
+  const [ratedLoading, setRatedLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
     getMasterOptions()
       .then(setMaster)
       .catch(() => setMasterError(true));
   }, []);
+
+  const RATING_DEFAULTS = {
+    professional1: "1", professional2: "1", professional3: "1",
+    professional4: "1", professional5: "1", professional6: "1",
+    pedagogical1: "1", pedagogical2: "1", pedagogical3: "1",
+    pedagogical4: "1", pedagogical5: "1", pedagogical6: "1",
+    social1: "1", social2: "1", social3: "1", social4: "1",
+    social5: "1", social6: "1", social7: "1",
+  } as const;
 
   const {
     register,
@@ -46,18 +59,12 @@ export default function FeedbackForm() {
     setValue,
     getValues,
     watch,
+    reset,
     formState: { errors, isSubmitting },
   } = useForm<FeedbackFormData>({
     resolver: zodResolver(feedbackSchema),
     mode: "onTouched",
-    defaultValues: {
-      professional1: "1", professional2: "1", professional3: "1",
-      professional4: "1", professional5: "1", professional6: "1",
-      pedagogical1: "1", pedagogical2: "1", pedagogical3: "1",
-      pedagogical4: "1", pedagogical5: "1", pedagogical6: "1",
-      social1: "1", social2: "1", social3: "1", social4: "1",
-      social5: "1", social6: "1", social7: "1",
-    },
+    defaultValues: RATING_DEFAULTS,
   });
 
   // Name list: all students, or only the chosen class's students if a class is picked
@@ -70,6 +77,41 @@ export default function FeedbackForm() {
     [master, selectedClass]
   );
   const classOf = (name: string) => master?.students.find((s) => s.name === name)?.class;
+
+  // One response per student per teacher: hide teachers this student already rated
+  const selectedName = watch("name");
+  const selectedTeacher = watch("teacherName");
+  const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  const isRated = (t: string) => ratedTeachers.some((r) => sameName(r, t));
+
+  useEffect(() => {
+    if (!selectedName || !selectedClass) {
+      setRatedTeachers([]);
+      return;
+    }
+    let cancelled = false;
+    setRatedLoading(true);
+    getRatedTeachers(selectedName, selectedClass)
+      .then((list) => !cancelled && setRatedTeachers(list))
+      .finally(() => !cancelled && setRatedLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedName, selectedClass]);
+
+  const availableTeachers = useMemo(
+    () => (master?.teachers ?? []).filter((t) => !isRated(t)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [master, ratedTeachers]
+  );
+  const allTeachersRated = !!master && !!selectedName && !ratedLoading && availableTeachers.length === 0;
+
+  // If the chosen teacher turns out to be already rated, clear it
+  useEffect(() => {
+    if (selectedTeacher && isRated(selectedTeacher)) setValue("teacherName", "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ratedTeachers, selectedTeacher]);
+
   const loadingPlaceholder = masterError ? "Failed to load list — please refresh" : "Loading…";
 
   const nextStep = async () => {
@@ -104,10 +146,24 @@ export default function FeedbackForm() {
     setSubmitMessage(null);
     const result = await submitFeedback(data);
     if (result.success) {
-      setSubmitMessage("✅ Thank you! Your feedback has been submitted.");
+      setRatedTeachers((list) => [...list, data.teacherName]);
+      setSubmitted(true);
+      setSubmitMessage(`✅ Thank you! Your feedback for ${data.teacherName} has been submitted.`);
+    } else if (result.duplicate) {
+      setRatedTeachers((list) => [...list, data.teacherName]);
+      setSubmitted(true); // nothing more to do for this teacher
+      setSubmitMessage(`❌ ${result.error}`);
     } else {
       setSubmitMessage(`❌ ${result.error ?? "Something went wrong. Please try again."}`);
     }
+  };
+
+  // Same student, next teacher: keep name + class, clear the rest
+  const rateAnotherTeacher = () => {
+    reset({ ...RATING_DEFAULTS, name: getValues("name"), class: getValues("class"), teacherName: "" });
+    setSubmitted(false);
+    setSubmitMessage(null);
+    setCurrentStep("personal");
   };
 
   const currentStepIndex = STEPS.findIndex((s) => s.key === currentStep);
@@ -253,6 +309,22 @@ export default function FeedbackForm() {
         .ss-selected { font-weight: 600; color: #0a72b5; }
         .ss-empty { padding: 0.6rem 0.75rem; color: #94a3b8; font-style: italic; font-size: 0.9rem; }
         .ss-mark { background: #fde68a; color: inherit; padding: 0; border-radius: 2px; }
+
+        .rated-note {
+          margin: 0.5rem 0 0;
+          font-size: 0.85rem;
+          color: #166534;
+          background: #dcfce7;
+          border: 1px solid #bbf7d0;
+          border-radius: 8px;
+          padding: 0.5rem 0.75rem;
+        }
+        .all-done {
+          margin-left: auto;
+          align-self: center;
+          font-weight: 600;
+          color: #166534;
+        }
 
         .error-text {
           color: #d9232d;
@@ -444,12 +516,18 @@ export default function FeedbackForm() {
                 control={control}
                 render={({ field }) => (
                   <SearchableSelect
-                    options={master?.teachers ?? []}
+                    options={availableTeachers}
                     value={field.value ?? ""}
                     onChange={field.onChange}
                     onBlur={field.onBlur}
-                    disabled={!master}
-                    disabledPlaceholder={loadingPlaceholder}
+                    disabled={!master || ratedLoading || allTeachersRated}
+                    disabledPlaceholder={
+                      !master
+                        ? loadingPlaceholder
+                        : ratedLoading
+                          ? "Checking…"
+                          : "You have rated all teachers 🎉"
+                    }
                     placeholder="Type to search teacher name"
                     emptyText="Teacher not found"
                     invalid={!!errors.teacherName}
@@ -457,6 +535,11 @@ export default function FeedbackForm() {
                 )}
               />
               {errors.teacherName && <p className="error-text">{errors.teacherName.message}</p>}
+              {ratedTeachers.length > 0 && (
+                <p className="rated-note">
+                  ✓ Already submitted for: <b>{ratedTeachers.join(", ")}</b> — each teacher can be rated only once.
+                </p>
+              )}
             </div>
           </section>
         )}
@@ -540,14 +623,27 @@ export default function FeedbackForm() {
           <button
             type="button"
             onClick={prevStep}
-            disabled={currentStep === "personal"}
+            disabled={currentStep === "personal" || submitted}
             className="btn btn-prev"
           >
             Previous
           </button>
 
-          {currentStep !== "review" ? (
-            <button type="button" onClick={nextStep} className="btn btn-next">
+          {submitted ? (
+            availableTeachers.length > 0 ? (
+              <button type="button" onClick={rateAnotherTeacher} className="btn btn-next">
+                Rate Another Teacher
+              </button>
+            ) : (
+              <span className="all-done">All teachers rated — thank you! 🎉</span>
+            )
+          ) : currentStep !== "review" ? (
+            <button
+              type="button"
+              onClick={nextStep}
+              className="btn btn-next"
+              disabled={currentStep === "personal" && (ratedLoading || allTeachersRated)}
+            >
               Next
             </button>
           ) : (

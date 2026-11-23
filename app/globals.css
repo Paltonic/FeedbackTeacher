@@ -1,6 +1,5 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind v4 (package.json: tailwindcss 4.x) — the old @tailwind directives no longer work */
+@import "tailwindcss";
 
 /* Reset dasar */
 :root {

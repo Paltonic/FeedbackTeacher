@@ -1,6 +1,7 @@
 // app/page.tsx
 import FeedbackForm from "./components/FeedbackForm";
 import Image from "next/image";
+import ResultsAccessButton from "./components/ResultsAccessButton";
 
 export default function Home() {
   return (
@@ -44,6 +45,9 @@ export default function Home() {
           © 2026 Nakamura School · Teacher Performance Feedback
         </p>
       </footer>
+
+      {/* Bottom-right button → password pop-up → /results */}
+      <ResultsAccessButton />
     </main>
   );
 }

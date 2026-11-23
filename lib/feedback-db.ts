@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { FieldValue, Timestamp, type DocumentSnapshot } from "firebase-admin/firestore";
 import type { FeedbackFormData } from "@/lib/schemas/feedback";
 import { db } from "@/lib/firebase-admin";
@@ -74,12 +75,67 @@ function fromDoc(snap: DocumentSnapshot): Feedback {
   return { ...(rest as Omit<Feedback, "id" | "createdAt" | "updatedAt">), id: snap.id, createdAt: toIso(createdAt), updatedAt: toIso(updatedAt) };
 }
 
+// ---------- ONE RESPONSE PER STUDENT PER TEACHER ----------
+
+/** Thrown when this student already rated this teacher. */
+export class DuplicateFeedbackError extends Error {
+  constructor() {
+    super("This student has already submitted feedback for this teacher");
+    this.name = "DuplicateFeedbackError";
+  }
+}
+
+const key = (v: unknown) => str(v).toLowerCase();
+
+/**
+ * Document ID built from class + student + teacher, so the database itself
+ * can hold only ONE response per pair (keep in sync with scripts/seed-dummy-feedback.mjs).
+ */
+export function feedbackId(sel: { class: unknown; name: unknown; teacherName: unknown }): string {
+  return createHash("sha256")
+    .update(`${key(sel.class)}|${key(sel.name)}|${key(sel.teacherName)}`)
+    .digest("hex")
+    .slice(0, 40);
+}
+
+/** Older responses were saved with random IDs — find those by their fields. */
+async function legacyResponseExists(sel: { class: string; name: string; teacherName: string }): Promise<boolean> {
+  const snap = await db()
+    .collection(COLLECTION)
+    .where("teacherNameLower", "==", key(sel.teacherName))
+    .where("name", "==", str(sel.name))
+    .get();
+  return snap.docs.some((d) => key(d.get("class")) === key(sel.class));
+}
+
+/** Teachers this student has already rated (exact names as stored). */
+export async function getTeachersRatedBy(name: string, cls: string): Promise<string[]> {
+  if (!str(name) || !str(cls)) return [];
+  const snap = await db().collection(COLLECTION).where("name", "==", str(name)).get();
+  const rated = snap.docs
+    .filter((d) => key(d.get("class")) === key(cls))
+    .map((d) => str(d.get("teacherName")));
+  return [...new Set(rated)];
+}
+
 // ---------- CREATE ----------
 
+/** Saves a response. Throws DuplicateFeedbackError if this student already rated this teacher. */
 export async function appendFeedback(data: FeedbackFormData): Promise<string> {
-  const ref = await db()
-    .collection(COLLECTION)
-    .add({ ...normalize(data), createdAt: FieldValue.serverTimestamp(), updatedAt: null });
+  const clean = normalize(data);
+  if (await legacyResponseExists(clean)) throw new DuplicateFeedbackError();
+
+  const ref = db().collection(COLLECTION).doc(feedbackId(clean));
+  try {
+    // create() fails if the document already exists — safe even if two submits arrive at once
+    await ref.create({ ...clean, createdAt: FieldValue.serverTimestamp(), updatedAt: null });
+  } catch (err) {
+    const code = (err as { code?: unknown })?.code;
+    if (code === 6 || code === "already-exists" || /already exists/i.test(String((err as Error)?.message))) {
+      throw new DuplicateFeedbackError();
+    }
+    throw err;
+  }
   return ref.id;
 }
 
