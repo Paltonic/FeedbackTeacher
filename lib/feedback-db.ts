@@ -123,7 +123,16 @@ export async function getTeachersRatedBy(name: string, cls: string): Promise<str
 /** Saves a response. Throws DuplicateFeedbackError if this student already rated this teacher. */
 export async function appendFeedback(data: FeedbackFormData): Promise<string> {
   const clean = normalize(data);
-  if (await legacyResponseExists(clean)) throw new DuplicateFeedbackError();
+
+  // Extra check for responses saved before the one-per-teacher rule.
+  // If this query fails, don't block saving: the document ID below still prevents duplicates.
+  let legacyDuplicate = false;
+  try {
+    legacyDuplicate = await legacyResponseExists(clean);
+  } catch (err) {
+    console.warn("[appendFeedback] legacy duplicate check skipped:", err);
+  }
+  if (legacyDuplicate) throw new DuplicateFeedbackError();
 
   const ref = db().collection(COLLECTION).doc(feedbackId(clean));
   try {
