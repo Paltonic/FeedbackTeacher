@@ -42,14 +42,15 @@ export default function FeedbackForm() {
       .catch(() => setMasterError(true));
   }, []);
 
-  const RATING_DEFAULTS = {
-    professional1: "1", professional2: "1", professional3: "1",
-    professional4: "1", professional5: "1", professional6: "1",
-    pedagogical1: "1", pedagogical2: "1", pedagogical3: "1",
-    pedagogical4: "1", pedagogical5: "1", pedagogical6: "1",
-    social1: "1", social2: "1", social3: "1", social4: "1",
-    social5: "1", social6: "1", social7: "1",
-  } as const;
+  // Ratings start EMPTY: students must pick every answer themselves
+  const EMPTY_FORM: Partial<FeedbackFormData> = {
+    name: "",
+    class: "",
+    teacherName: "",
+    professionalSuggestion: "",
+    pedagogicalSuggestion: "",
+    socialSuggestion: "",
+  };
 
   const {
     register,
@@ -64,7 +65,7 @@ export default function FeedbackForm() {
   } = useForm<FeedbackFormData>({
     resolver: zodResolver(feedbackSchema),
     mode: "onTouched",
-    defaultValues: RATING_DEFAULTS,
+    defaultValues: EMPTY_FORM,
   });
 
   // Name list: all students, or only the chosen class's students if a class is picked
@@ -160,7 +161,7 @@ export default function FeedbackForm() {
 
   // Same student, next teacher: keep name + class, clear the rest
   const rateAnotherTeacher = () => {
-    reset({ ...RATING_DEFAULTS, name: getValues("name"), class: getValues("class"), teacherName: "" });
+    reset({ ...EMPTY_FORM, name: getValues("name"), class: getValues("class") });
     setSubmitted(false);
     setSubmitMessage(null);
     setCurrentStep("personal");
